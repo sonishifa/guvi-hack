@@ -3,7 +3,7 @@ from typing import List, Optional
 
 # 1. INPUT MODELS (What the Scammer Sends)
 
-class MessageData(BaseModel):
+class Message(BaseModel):
     sender: str  # "scammer" or "user"
     text: str
     timestamp: str
@@ -15,9 +15,9 @@ class Metadata(BaseModel):
 
 class IncomingRequest(BaseModel):
     sessionId: str
-    message: MessageData
+    message: Message
     # Defaults to empty list for the first message
-    conversationHistory: List[MessageData] = []
+    conversationHistory: List[dict] = []
     metadata: Optional[Metadata] = None
 
 # 2. OUTPUT MODELS (What You Send Back)
