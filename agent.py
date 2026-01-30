@@ -26,8 +26,10 @@ def get_agent_response(history: list, current_text: str) -> dict:
     # 1. Format History for the Prompt
     history_text = ""
     for msg in history:
-        role = "Scammer" if msg.get("sender") == "scammer" else "User (You)"
-        history_text += f"{role}: {msg.get('text')}\n"
+        sender = msg.get("sender", "unknown")
+        text = msg.get("text", "")
+        role = "Scammer" if sender == "scammer" else "User (You)"
+        history_text += f"{role}: {text}\n"
 
     # 2. The Master Prompt (Skeptical Persona)
     prompt = f"""
