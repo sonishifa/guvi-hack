@@ -41,19 +41,11 @@ async def process_incoming_message(payload: dict) -> tuple[AgentResponse, FinalC
         current_timestamp = msg_data.get("timestamp", datetime.now(timezone.utc).isoformat())
 
     session_id = payload.get("sessionId", "unknown_session")
+    
+    # --- SIMPLIFIED: Keep History as a List of Dictionaries ---
+    # We do NOT convert to Objects anymore. This prevents the 'no attribute get' error.
     raw_history = payload.get("conversationHistory", [])
     
-    # --- Convert History to Objects for Agent ---
-    object_history = []
-    for h in raw_history:
-        try:
-            if isinstance(h, dict):
-                object_history.append(Message(**h)) 
-            else:
-                object_history.append(h)
-        except Exception:
-            continue
-
     # --- STEP 1: SCAM DETECTION ---
     is_scam = False
     scam_category = "None"
@@ -76,7 +68,8 @@ async def process_incoming_message(payload: dict) -> tuple[AgentResponse, FinalC
         ), None
 
     # --- STEP 3: ACTIVATE AGENT ---
-    ai_result = agent.get_agent_response(object_history, current_text)
+    # Pass the list of Dictionaries directly. agent.py is ready for this.
+    ai_result = agent.get_agent_response(raw_history, current_text)
     
     # --- STEP 4: INTELLIGENCE ---
     regex_data = utils.extract_regex_data(current_text)
@@ -95,7 +88,7 @@ async def process_incoming_message(payload: dict) -> tuple[AgentResponse, FinalC
     
     if len(raw_history) > 0:
         first_msg = raw_history[0]
-        # Robust Access
+        # Robust Access (Dict or Object)
         if isinstance(first_msg, dict):
             first_ts_val = first_msg.get("timestamp")
         else:

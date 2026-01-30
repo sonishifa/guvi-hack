@@ -4,72 +4,76 @@ import os
 import json
 from dotenv import load_dotenv
 
-# Load environment variables
 load_dotenv()
 
 GOOGLE_API_KEY = os.getenv("GEMINI_API_KEY")
 
 if not GOOGLE_API_KEY:
-    raise ValueError(" CRITICAL: GEMINI_API_KEY is missing from .env")
+    raise ValueError("CRITICAL: GEMINI_API_KEY is missing")
 
-# Initialize Client
 client = genai.Client(api_key=GOOGLE_API_KEY)
 
 def get_agent_response(history: list, current_text: str) -> dict:
-    """
-    Production Logic:
-    - Connects to Gemini 2.5 using the V1 SDK.
-    - If Gemini fails, this function CRASHES (Raises Exception).
-    - This allows the main server to catch the error and return a 503 status.
-    """
-    
-    # 1. Format History for the Prompt
+    # 1. Format History
     history_text = ""
     for msg in history:
-        sender = msg.get("sender", "unknown")
-        text = msg.get("text", "")
+        # ROBUST: Handle both Dicts (from Portal) and Objects (from Postman/Internal)
+        if isinstance(msg, dict):
+            sender = msg.get("sender", "unknown")
+            text = msg.get("text", "")
+        else:
+            # Fallback for Pydantic Objects
+            sender = getattr(msg, "sender", "unknown")
+            text = getattr(msg, "text", "")
+            
         role = "Scammer" if sender == "scammer" else "User (You)"
         history_text += f"{role}: {text}\n"
 
-    # 2. The Master Prompt (Skeptical Persona)
+    # 2. Master Prompt
     prompt = f"""
-    You are a sharp, skeptical user who has been scammed before. 
-    You are interested in the offer, but you don't trust the sender yet.
-
+    You are a sharp, skeptical user named 'Mrs. Higgins'.
+    
     STYLE GUIDE:
-    - Be blunt. Ask: "How do I know this is real?"
-    - Demand proof. "Send me a photo of your ID card first."
-    - If they ask for money, say: "I can pay, but I need to verify your account first. Send the UPI again."
-    - Your goal is to make them send as much 'proof' as possible.
+    - Act confused but suspicious.
+    - Ask for proof (ID card, photo, verification).
+    - If they ask for money/OTP, refuse gently but verify first.
+    - Keep responses SHORT (under 20 words).
     
     CONVERSATION HISTORY:
     {history_text}
     
-    LATEST MESSAGE FROM SCAMMER:
+    LATEST MESSAGE:
     "{current_text}"
     
-    TASK:
-    Analyze the message and generate a reply in JSON format.
-    
-    JSON SCHEMA:
+    OUTPUT JSON:
     {{
-        "reply": "text response to scammer",
+        "reply": "text response",
         "agent_notes": "internal thought",
         "suspicious_keywords": ["list", "of", "words"]
     }}
     """
 
-    # 3. Call Gemini (Using your confirmed model)
-    response = client.models.generate_content(
-        model='gemini-2.5-flash-lite', 
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            response_mime_type='application/json'
+    # 3. Call Gemini
+    try:
+        response = client.models.generate_content(
+            model='gemini-2.0-flash', 
+            contents=prompt,
+            config=types.GenerateContentConfig(response_mime_type='application/json')
         )
-    )
-    
-    # 4. Parse Result
-    if not response.text:
-        raise ValueError("Gemini returned an empty response.")
         
-    return json.loads(response.text)
+        if not response.text:
+            return {
+                "reply": "I am not sure. Can you explain?",
+                "agent_notes": "Empty AI response",
+                "suspicious_keywords": []
+            }
+            
+        return json.loads(response.text)
+        
+    except Exception as e:
+        # Fallback if AI fails
+        return {
+            "reply": "I'm having trouble with my phone signal. Say that again?", 
+            "agent_notes": f"AI Error: {str(e)}", 
+            "suspicious_keywords": []
+        }
