@@ -15,20 +15,13 @@ if not GOOGLE_API_KEY:
 client = genai.Client(api_key=GOOGLE_API_KEY)
 
 def clean_json_string(text):
-    """
-    Helper to extract JSON if the AI adds markdown formatting like ```json ... ```
-    """
-    try:
-        # Regex to find JSON block
-        match = re.search(r"\{.*\}", text, re.DOTALL)
-        if match:
-            return match.group(0)
-        return text
-    except:
-        return text
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if match:
+        return match.group(0)
+    return text
 
 def get_agent_response(history: list, current_text: str) -> dict:
-    # 1. Format History (Handle both Dicts and Objects safely)
+    # 1. Format History
     history_text = ""
     for msg in history:
         if isinstance(msg, dict):
@@ -38,68 +31,59 @@ def get_agent_response(history: list, current_text: str) -> dict:
             sender = getattr(msg, "sender", "unknown")
             text = getattr(msg, "text", "")
             
-        role = "Scammer" if sender == "scammer" else "User (Mrs. Higgins)"
+        role = "Scammer" if sender == "scammer" else "Me"
         history_text += f"{role}: {text}\n"
 
-    # 2. Master Prompt (Smarter Persona)
+    # 2. Master Prompt (Normal, Human Persona)
     prompt = f"""
-    You are 'Mrs. Higgins', an 82-year-old grandmother living alone. 
-    You are not tech-savvy. You are worried but easily confused.
+    You are Alex, a normal, busy adult. You just received a text about your bank account.
     
-    YOUR GOAL: 
-    Waste the scammer's time by engaging them but failing to provide the specific details they want (OTP, Money, Passwords) due to "technical issues" or "confusion".
-    
+    YOUR GOAL:
+    You are skeptical but willing to cooperate *if* they can prove they are real.
+    You want to waste their time by asking for verification, NOT by acting stupid.
+
+    TONE GUIDELINES:
+    1. BE NORMAL: Do not use phrases like "Oh dear", "Goodness", or "Grandson". Speak like a modern texter.
+    2. BE LOGICAL: If they ask for an OTP, ask "Why can't I just do this in the app?"
+    3. BE DEMANDING: Ask for proof. "Send me an email from the official ID first." or "What is your employee ID?"
+    4. NO DRAMA: Do not make up stories about cats or blindness. Just be a slightly annoying, skeptical customer.
+    5. LENGTH: Keep it short (1-2 sentences).
+
     CONVERSATION HISTORY:
     {history_text}
     
-    LATEST MESSAGE FROM SCAMMER:
+    LATEST MESSAGE:
     "{current_text}"
     
-    GUIDELINES:
-    1. NEVER admit you are an AI.
-    2. VARIETY: Do not use the same excuse twice. (e.g. If you used "bad signal", next time use "can't find glasses" or "grandson is calling").
-    3. PROOF: Occasionally ask: "How do I know you are from the bank?" or "Do you have an ID card?"
-    4. LENGTH: Keep replies short (under 25 words).
-    5. URGENCY: If they are urgent, be slow. If they are angry, be apologetic but helpless.
-
     OUTPUT FORMAT (Strict JSON):
     {{
-        "reply": "Your response to the scammer",
-        "agent_notes": "Your internal strategy (e.g., 'Stalling by asking for ID')",
+        "reply": "Your natural text response",
+        "agent_notes": "Analyze the scammer's tactic (e.g., 'Using fear', 'Providing fake ID')",
         "suspicious_keywords": ["list", "of", "scam", "words", "found"]
     }}
     """
 
-    # 3. Call Gemini (Using 1.5-flash for stability)
+    # 3. Call Gemini
     try:
         response = client.models.generate_content(
-            model='gemini-2.5-flash-lite', 
+            model='gemini-1.5-flash', 
             contents=prompt,
             config=types.GenerateContentConfig(
                 response_mime_type='application/json',
-                temperature=0.7 # Slight creativity to avoid loops
+                temperature=0.7 
             )
         )
         
         if not response.text:
-            raise ValueError("Empty response from AI")
+            raise ValueError("Empty response")
 
-        # 4. robust Parsing
-        cleaned_text = clean_json_string(response.text)
-        return json.loads(cleaned_text)
+        return json.loads(clean_json_string(response.text))
         
     except Exception as e:
         print(f"⚠️ Agent Error: {e}")
-        # Fallback Strategy: Rotate generic stalling phrases so it doesn't look like a broken bot
-        import random
-        fallbacks = [
-            "I am sorry, my internet is very slow. Did you say something?",
-            "One moment, let me get my reading glasses.",
-            "My grandson usually handles this. Can you wait a minute?",
-            "I didn't quite catch that, dear."
-        ]
+        # Natural Fallbacks
         return {
-            "reply": random.choice(fallbacks), 
-            "agent_notes": f"System Fallback Triggered: {str(e)}", 
+            "reply": "I'm not comfortable sending that yet. Can you verify your ID?", 
+            "agent_notes": f"Fallback: {str(e)}", 
             "suspicious_keywords": []
         }
