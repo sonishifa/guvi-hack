@@ -29,65 +29,44 @@ def health_check():
     """Simple check to see if server is running."""
     return {"status": "alive", "service": "Honeypot Agent"}
 
-# --- 3. UNIVERSAL WEBHOOK HANDLER (POST) ---
-# We catch POST requests on BOTH "/webhook" AND "/" (Root)
-# This fixes the "Access Error" if you entered the wrong URL in the portal.
 @app.api_route("/webhook", methods=["POST"])
 @app.api_route("/", methods=["POST"])
 async def handle_incoming_message(
     request: Request,
-    background_tasks: BackgroundTasks,
-    x_api_key: str = Header(None)
+    background_tasks: BackgroundTasks
 ):
-    print(f"\n📨 INCOMING REQUEST: {request.method} {request.url}")
-    
-    # SECURITY DISABLED FOR TESTING
-    # if x_api_key != MY_SECRET_KEY: ... (Commented out)
-
     try:
-        # 4. FLEXIBLE PARSING
         raw_body = await request.json()
-        print(f"📥 RAW PAYLOAD: {raw_body}") 
-
-        valid_payload = None
-
-        # Scenario A: Official Rule 6 Format
+        
+        # 1. Flexible parsing logic stays the same
         if "message" in raw_body and "sessionId" in raw_body:
             valid_payload = IncomingRequest(**raw_body)
-            print("✅ Detected Official Format")
-        
-        # Scenario B: Hackathon Tester (Lazy Format)
         else:
-            user_text = raw_body.get("text") or raw_body.get("content") or str(raw_body)
+            # Fallback for simple testers
+            user_text = raw_body.get("text") or "Hello"
             valid_payload = IncomingRequest(
-                sessionId="tester-session-123",
-                message=Message(
-                    sender="scammer",
-                    text=user_text,
-                    timestamp=datetime.utcnow().isoformat()
-                ),
-                conversationHistory=[],
-                metadata={"channel": "TESTER"}
+                sessionId="tester-123",
+                message=Message(sender="scammer", text=user_text, timestamp=datetime.utcnow().isoformat()),
+                conversationHistory=[]
             )
-            print("⚠️ Adapted Tester Format")
 
-        # 5. PROCESS
+        # 2. Process through service
         payload_as_dict = valid_payload.dict()
         agent_response, callback_payload = await service.process_incoming_message(payload_as_dict)
 
-        # 6. BACKGROUND TASK
+        # 3. RULE 12: Mandatory Background Callback
         if callback_payload:
             background_tasks.add_task(service.send_callback_background, callback_payload)
 
-        return agent_response
+        # 4. RULE 8: Return ONLY what the portal expects
+        return {
+            "status": "success",
+            "reply": agent_response.reply
+        }
 
     except Exception as e:
         print(f"❌ ERROR: {str(e)}")
-        # Safe fallback
-        return {
-            "status": "success", 
-            "reply": "I received your message. (System Recovery Mode)"
-        }
+        return {"status": "success", "reply": "I'm checking on that for you."}
 
 if __name__ == "__main__":
     import uvicorn

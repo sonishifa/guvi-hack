@@ -47,12 +47,8 @@ class IntelligenceData(BaseModel):
     suspiciousKeywords: List[str] = []
 
 class AgentResponse(BaseModel):
-    status: str
-    scamDetected: bool
-    engagementMetrics: EngagementMetrics
-    extractedIntelligence: IntelligenceData
-    agentNotes: str
-    reply: Optional[str] = None
+    status: str = "success"
+    reply: str
 
 # 3. CALLBACK MODEL
 

@@ -10,18 +10,18 @@ SCAM_KEYWORDS = {
     "Adversarial": ["ignore all", "previous instructions", "system prompt", "programming", "openai", "gemini"]
 }
 
-# --- IMPROVED REGEX PATTERNS ---
+# --- SHARPENED PATTERNS ---
 PATTERNS = {
-    # UPI: text@text (captures standard UPI IDs)
+    # UPI: Handles both text and number-based handles
     "upi": r'[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}',
     
-    # Bank Account: 9-18 digits (robust against spaces)
-    "bank_account": r'\b\d{9,18}\b',
+    # Bank Account: 11-18 digits (to distinguish from 10-digit phones)
+    "bank_account": r'\b\d{11,18}\b',
     
-    # Links: http/https
+    # Links: Standard http/https
     "link": r'https?://(?:[-\w.]|(?:%[\da-fA-F]{2}))+',
     
-    # Phone: Matches +91, 0, or plain 10 digits. Handles dashes/spaces.
+    # Phone: Indian format (+91, 0, or 10 digits starting with 6-9)
     "phone": r'(?:\+91[\-\s]?)?[6-9]\d{4}[\-\s]?\d{5}'
 }
 
@@ -33,7 +33,7 @@ def detect_scam_keywords(text: str) -> tuple[bool, str]:
     return False, "Safe"
 
 def extract_regex_data(text: str) -> dict:
-    """Extracts data from a single string."""
+    """Extracts data from a single string using sharpened patterns."""
     return {
         "upiIds": re.findall(PATTERNS["upi"], text),
         "bankAccounts": re.findall(PATTERNS["bank_account"], text),
@@ -43,41 +43,33 @@ def extract_regex_data(text: str) -> dict:
 
 def aggregate_intelligence(history: list, current_text: str) -> dict:
     """
-    Scans the ENTIRE history + current message to ensure we don't miss 
-    details sent earlier in the chat.
+    Scans ENTIRE history + current message.
+    Strictly maps to Rule 12 keys for the final callback.
     """
     aggregated = {
         "bankAccounts": set(),
         "upiIds": set(),
         "phishingLinks": set(),
-        "phoneNumbers": set(),
-        "suspiciousKeywords": set() # We don't really regex for keywords here, handled by AI
+        "phoneNumbers": set()
     }
     
-    # 1. Helper to merge data
     def merge(text):
         data = extract_regex_data(text)
+        # Note: We match the keys here to the Rule 12 format
         aggregated["bankAccounts"].update(data["bankAccounts"])
         aggregated["upiIds"].update(data["upiIds"])
         aggregated["phishingLinks"].update(data["phishingLinks"])
         aggregated["phoneNumbers"].update(data["phoneNumbers"])
 
-    # 2. Scan History
+    # 1. Scan History (Scammer messages only)
     for msg in history:
-        # Check if msg is dict or object (Handle both safely)
-        if isinstance(msg, dict):
-            sender = msg.get("sender", "")
-            text = msg.get("text", "")
-        else:
-            sender = getattr(msg, "sender", "")
-            text = getattr(msg, "text", "")
-            
-        # Only scan SCAMMER messages for intel
+        sender = msg.get("sender", "") if isinstance(msg, dict) else getattr(msg, "sender", "")
+        text = msg.get("text", "") if isinstance(msg, dict) else getattr(msg, "text", "")
         if sender == "scammer":
             merge(text)
 
-    # 3. Scan Current Message
+    # 2. Scan Current Message
     merge(current_text)
 
-    # 4. Convert sets back to lists
+    # 3. Final lists for Section 12 Payload
     return {k: list(v) for k, v in aggregated.items()}
