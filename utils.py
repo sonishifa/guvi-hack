@@ -12,17 +12,12 @@ SCAM_KEYWORDS = {
 
 # --- SHARPENED PATTERNS ---
 PATTERNS = {
-    # UPI: Handles both text and number-based handles
     "upi": r'[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}',
-    
-    # Bank Account: 11-18 digits (to distinguish from 10-digit phones)
+    # Bank Account: 11-18 digits (standard for most Indian banks)
     "bank_account": r'\b\d{11,18}\b',
-    
-    # Links: Standard http/https
     "link": r'https?://(?:[-\w.]|(?:%[\da-fA-F]{2}))+',
-    
-    # Phone: Indian format (+91, 0, or 10 digits starting with 6-9)
-    "phone": r'(?:\+91[\-\s]?)?[6-9]\d{4}[\-\s]?\d{5}'
+    # Phone: 10 digits starting with 6-9
+    "phone": r'\b[6-9]\d{9}\b'
 }
 
 def detect_scam_keywords(text: str) -> tuple[bool, str]:
@@ -33,19 +28,28 @@ def detect_scam_keywords(text: str) -> tuple[bool, str]:
     return False, "Safe"
 
 def extract_regex_data(text: str) -> dict:
-    """Extracts data from a single string using sharpened patterns."""
-    return {
+    """Extracts data using both raw and normalized text to catch obscured numbers."""
+    
+    # 1. Standard extraction (for links and UPIs which usually don't have internal spaces)
+    results = {
         "upiIds": re.findall(PATTERNS["upi"], text),
-        "bankAccounts": re.findall(PATTERNS["bank_account"], text),
+        "bankAccounts": [],
         "phishingLinks": re.findall(PATTERNS["link"], text),
-        "phoneNumbers": re.findall(PATTERNS["phone"], text)
+        "phoneNumbers": []
     }
 
+    # 2. Advanced extraction for spaced-out numbers (e.g., "9 8 7 6 5 4 3 2 1 0")
+    # We remove ALL whitespace and hyphens to find hidden sequences
+    normalized_text = re.sub(r'[\s\-]', '', text)
+    
+    # Extract from normalized text
+    results["bankAccounts"] = re.findall(PATTERNS["bank_account"], normalized_text)
+    results["phoneNumbers"] = re.findall(PATTERNS["phone"], normalized_text)
+
+    return results
+
 def aggregate_intelligence(history: list, current_text: str) -> dict:
-    """
-    Scans ENTIRE history + current message.
-    Strictly maps to Rule 12 keys for the final callback.
-    """
+    """Scans ENTIRE history + current message for mandatory Section 12 callback."""
     aggregated = {
         "bankAccounts": set(),
         "upiIds": set(),
@@ -53,23 +57,21 @@ def aggregate_intelligence(history: list, current_text: str) -> dict:
         "phoneNumbers": set()
     }
     
-    def merge(text):
-        data = extract_regex_data(text)
-        # Note: We match the keys here to the Rule 12 format
+    def merge(text_to_scan):
+        data = extract_regex_data(text_to_scan)
         aggregated["bankAccounts"].update(data["bankAccounts"])
         aggregated["upiIds"].update(data["upiIds"])
         aggregated["phishingLinks"].update(data["phishingLinks"])
         aggregated["phoneNumbers"].update(data["phoneNumbers"])
 
-    # 1. Scan History (Scammer messages only)
+    # Scan History (Scammer messages only)
     for msg in history:
         sender = msg.get("sender", "") if isinstance(msg, dict) else getattr(msg, "sender", "")
         text = msg.get("text", "") if isinstance(msg, dict) else getattr(msg, "text", "")
         if sender == "scammer":
             merge(text)
 
-    # 2. Scan Current Message
+    # Scan Current Message
     merge(current_text)
 
-    # 3. Final lists for Section 12 Payload
     return {k: list(v) for k, v in aggregated.items()}
