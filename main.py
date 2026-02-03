@@ -75,6 +75,7 @@ async def handle_incoming_message(
         # 5. RULE 12 CALLBACK
         if callback_payload:
             background_tasks.add_task(service.send_callback_background, callback_payload)
+            return agent_response
 
         # 6. RULE 8 RESPONSE (Strict status and reply)
         return {
