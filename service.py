@@ -7,76 +7,50 @@ import agent
 import requests 
 from datetime import datetime, timezone
 
-# Official Evaluation Endpoint from Rule 12
 CALLBACK_URL = "https://hackathon.guvi.in/api/updateHoneyPotFinalResult"
 
-def parse_timestamp(ts_input) -> datetime:
-    """Standardizes various timestamp formats into ISO-8601 for the judges."""
-    try:
-        if isinstance(ts_input, (int, float)):
-            seconds = ts_input / 1000.0 if ts_input > 1e10 else ts_input
-            return datetime.fromtimestamp(seconds, timezone.utc)
-        
-        ts_string = str(ts_input)
-        if ts_string.endswith('Z'):
-            ts_string = ts_string[:-1] + '+00:00'
-        
-        dt = datetime.fromisoformat(ts_string)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt
-    except Exception:
-        return datetime.now(timezone.utc)
-
 async def process_incoming_message(payload: dict) -> tuple[dict, FinalCallbackPayload | None]:
-    # 1. EXTRACT DATA
     msg_data = payload.get("message", {})
     current_text = msg_data.get("text", "") if isinstance(msg_data, dict) else str(msg_data)
-    
     session_id = payload.get("sessionId", "unknown_session")
     raw_history = payload.get("conversationHistory", [])
     
-    # --- STEP 1: MULTI-TIER SCAM DETECTION ---
+    # --- STEP 1: 3-TIER DEFENSE ---
+    
+    # Tier 1: Keywords
     is_scam, scam_category = utils.detect_scam_keywords(current_text)
 
-    # Intelligence-based trigger (Pattern Detection)
-    regex_data = utils.extract_regex_data(current_text)
-    if any(len(v) > 0 for v in regex_data.values()):
-        is_scam = True
-        scam_category = "Financial Pattern Identified"
+    # Tier 2: Regex (Pattern Detection)
+    if not is_scam:
+        regex_data = utils.extract_regex_data(current_text)
+        if any(len(v) > 0 for v in regex_data.values()):
+            is_scam, scam_category = True, "Financial Pattern"
 
-    # --- STEP 1.2: HISTORY ESCALATION (The Memory Guard) ---
+    # Tier 3: NLP (Intent Analysis) - The new "Brain"
+    if not is_scam:
+        is_scam, scam_category = await utils.detect_scam_intent_nlp(current_text, agent.client)
+
+    # --- STEP 1.2: HISTORY ESCALATION ---
     if not is_scam:
         for msg in raw_history:
             m_sender = msg.get("sender", "") if isinstance(msg, dict) else getattr(msg, "sender", "")
             m_text = msg.get("text", "") if isinstance(msg, dict) else getattr(msg, "text", "")
-
             if m_sender == "scammer":
                 was_scam, cat = utils.detect_scam_keywords(m_text)
-                hist_regex = utils.extract_regex_data(m_text)
-                has_hist_intel = any(len(v) > 0 for v in hist_regex.values())
-
-                if was_scam or has_hist_intel:
-                    is_scam = True
-                    scam_category = cat if was_scam else "Historical Pattern"
+                hist_intel = any(len(v) > 0 for v in utils.extract_regex_data(m_text).values())
+                if was_scam or hist_intel:
+                    is_scam, scam_category = True, cat if was_scam else "Historical Pattern"
                     break
 
-# --- STEP 2: PASSIVE MODE ---
+    # --- STEP 2: PASSIVE MODE ---
     if not is_scam:
-        return {
-        "status": "success",
-        "reply": "I'm not sure I understand. Can you explain?"
-    }, None
-
-
+        return {"status": "success", "reply": "I'm not sure I understand. Can you explain?"}, None
 
     # --- STEP 3: ACTIVATE AGENT ---
     ai_result = agent.get_agent_response(raw_history, current_text)
     
-    # --- STEP 4: INTELLIGENCE EXTRACTION (FULL HISTORY) ---
-    # We do NOT trim history to ensure Rule 12 quality
+    # --- STEP 4-7: INTELLIGENCE & CALLBACK ---
     aggregated_data = utils.aggregate_intelligence(raw_history, current_text)
-    
     final_intel = IntelligenceData(
         bankAccounts=aggregated_data["bankAccounts"],
         upiIds=aggregated_data["upiIds"],
@@ -85,45 +59,24 @@ async def process_incoming_message(payload: dict) -> tuple[dict, FinalCallbackPa
         suspiciousKeywords=ai_result.get("suspicious_keywords", [])
     )
 
-    # --- STEP 5: CALCULATE TOTAL MESSAGES ---
     total_messages = len(raw_history) + 1 
+    portal_response = {"status": "success", "reply": ai_result.get("reply", "Can you verify your bank ID first?")}
 
-    # --- STEP 6: AGENT OUTPUT (RULE 8 COMPLIANT) ---
-    # Return ONLY status and reply to turn the portal GREEN
-    portal_response = {
-        "status": "success",
-        "reply": ai_result.get("reply", "Can you verify your bank ID first?")
-    }
-
-    # --- STEP 7: THE RULE 12 TRIGGER ---
     callback_payload = None
-
-    # Logic: Only send the final result if we've actually caught data 
-    # OR we've reached a deep engagement (e.g., 15+ turns)
-    has_intel = (
-        len(final_intel.bankAccounts) > 0 or 
-        len(final_intel.upiIds) > 0 or 
-        len(final_intel.phoneNumbers) > 0 or
-        len(final_intel.phishingLinks) > 0
-    )
+    has_intel = any(len(getattr(final_intel, k)) > 0 for k in ["bankAccounts", "upiIds", "phoneNumbers", "phishingLinks"])
 
     if has_intel or total_messages >= 15:
-        detailed_notes = ai_result.get("agent_notes", f"Scam detected in {scam_category} category. Engagement depth: {total_messages} turns.")
+        detailed_notes = ai_result.get("agent_notes", f"Scam detected: {scam_category}. Turns: {total_messages}")
         callback_payload = FinalCallbackPayload(
-            sessionId=session_id,
-            scamDetected=True,
-            totalMessagesExchanged=total_messages,
-            extractedIntelligence=final_intel,
-            agentNotes=detailed_notes
+            sessionId=session_id, scamDetected=True, totalMessagesExchanged=total_messages,
+            extractedIntelligence=final_intel, agentNotes=detailed_notes
         )
 
     return portal_response, callback_payload
 
 def send_callback_background(payload: FinalCallbackPayload):
-    """Executes the mandatory Section 12 callback."""
     try:
-        data = payload.dict()
-        response = requests.post(CALLBACK_URL, json=data, timeout=5)
-        print(f"✅  Callback Result Sent: {response.status_code}")
+        requests.post(CALLBACK_URL, json=payload.dict(), timeout=5)
+        print(f"✅ Callback Sent")
     except Exception as e:
         print(f"❌ Callback Failed: {e}")
