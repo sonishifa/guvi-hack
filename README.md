@@ -1,37 +1,97 @@
-# HoneyShield
+<h1>
+  <img src="src/logo.png" alt="HoneyShield Logo" width="40" style="vertical-align: middle; margin-right: 10px;">
+  HoneyShield
+</h1>
 
-## Description
-An AI‑powered agentic honeypot that detects scam messages, engages fraudsters with a realistic human persona (“Alex”), and extracts actionable intelligence (bank accounts, UPI IDs, phone numbers, phishing links, emails). The system uses a three‑layer detection pipeline (keywords → regex → NLP) and a dual‑mode output: background callback after an idle timeout, and a GET endpoint for manual retrieval.
+An AI-powered **agentic honeypot** that detects scam messages, engages fraudsters with a realistic human persona (“Alex”), and extracts actionable intelligence such as:
 
-## Tech Stack
-- **Language & Framework:** Python 3.10+, FastAPI
-- **Key Libraries:** `google-genai` (Gemini API), `requests`, `python-dotenv`, `pydantic`, `asyncio`
-- **LLM/AI Models:** Google Gemini-2.5-Flash-Lite (for scam intent detection, entity extraction and for the agent persona) 
-- **Deployment:** Compatible with Render, Heroku, or any cloud platform supporting Python
+- Bank Accounts  
+- UPI IDs  
+- Phone Numbers  
+- Phishing Links  
+- Email Addresses  
 
-## Setup Instructions
-1. **Clone the repository**
+The system uses a **three-layer detection pipeline** (Keywords → Regex → NLP) and a **dual-mode output system**:
+- Background callback after idle timeout  
+- GET endpoint for manual retrieval  
+
+---
+
+# 📌 Tech Stack
+
+**Language & Framework**
+- Python 3.10+
+- FastAPI
+
+**Key Libraries**
+- `google-genai`
+- `requests`
+- `python-dotenv`
+- `pydantic`
+- `asyncio`
+
+**LLM / AI Model**
+- Google Gemini-2.5-Flash-Lite  
+  (Scam intent detection, entity extraction, and agent persona)
+
+**Deployment**
+- Render
+- Heroku
+- Any Python-compatible cloud platform
+
+---
+
+# ⚙️ Setup Instructions
+
+## 1️⃣ Clone the Repository
+
+```bash
 git clone https://github.com/sonishifa/Honeypot-AI.git
 cd Honeypot-AI
+```
 
-2. **Install dependencies**
+## 2️⃣ Install Dependencies
+
+```bash
 pip install -r requirements.txt
+```
 
-3. **Set environment variables**
-Copy .env.example to .env and fill in your values:
+## 3️⃣ Set Environment Variables
+
+Copy `.env.example` to `.env` and configure:
+
+```
 GEMINI_API_KEY=your_google_gemini_api_key
 SCAMMER_API_KEY=your_secret_api_key_for_authentication
-CALLBACK_URL=   # optional – if provided, final output will be POSTed here after 10s of inactivity
+CALLBACK_URL=   # optional – final output POSTed here after 10s inactivity
+```
 
-4. **Run the application**
+## 4️⃣ Run the Application
+
+```bash
 uvicorn src.main:app --host 0.0.0.0 --port 8000
+```
 
-5. **API Endpoint**
-URL: https://honeypot-ai-guard.onrender.com/webhook
-Method: POST
-Authentication: x-api-key header (value = SCAMMER_API_KEY from your environment)
+---
 
-Request Format (JSON)
+# 🌐 API Endpoint
+
+**Webhook URL**
+```
+https://honeypot-ai-guard.onrender.com/webhook
+```
+
+**Method:** `POST`  
+**Authentication Header:**  
+```
+x-api-key: SCAMMER_API_KEY
+```
+
+---
+
+## 📥 Request Format (JSON)
+
+```json
 {
   "sessionId": "unique-session-id",
   "message": {
@@ -46,55 +106,131 @@ Request Format (JSON)
     "locale": "IN"
   }
 }
+```
 
-Response Format (JSON)
+---
+
+## 📤 Response Format (JSON)
+
+```json
 {
   "status": "success",
   "reply": "Why would my account be blocked? I just used the app this morning."
 }
+```
 
-Retrieving Final Output (Mode B)
-After the conversation ends (10 seconds of inactivity), the final intelligence is available via:
+---
 
+# 📊 Retrieving Final Output (Mode B)
+
+After 10 seconds of inactivity:
+
+```bash
 GET https://your-deployed-url.com/final/{sessionId}
-(requires the same x-api-key header)
+```
 
-## Approach
-1. **Scam Detection – Three‑Tier Shield**
-Keyword Spotter: A curated list of scam‑related words grouped by category (financial, urgency, tech, etc.). Fast, low‑cost first pass.
+Requires the same `x-api-key` header.
 
-Pattern Hunter (Regex): Generic patterns for UPI IDs, bank account numbers, phone numbers, emails, and phishing links. Also normalises text to catch obfuscated numbers.
+---
 
-AI Brain (NLP): Uses Google Gemini to understand intent – catches scams that use novel phrasing or avoid obvious keywords. If any layer triggers, the message is flagged as scam.
+# 🧠 Approach
 
-2. **Engagement – Human‑Like Agent “Alex”**
-Once a scam is detected, control passes to a Gemini‑powered agent with a carefully crafted prompt.
+---
 
-Alex is a busy, slightly frustrated bank customer who uses modern language, hesitation (“...”), and sceptical questions to stall the scammer.
+## 1️⃣ Scam Detection – Three-Tier Shield
 
-The prompt adapts based on the detected scam type (e.g., bank fraud → ask for official ID; phishing → refuse to click links).
+### 🔎 Keyword Spotter
+Curated scam-related words grouped by category (financial, urgency, tech, etc.).  
+Fast, low-cost first pass.
 
-3. **Intelligence Extraction – Layered Entity Gathering**
-Regex extraction immediately captures any structured data (UPI, phone, bank account, email, link) from the current message.
+### 🧩 Pattern Hunter (Regex)
+Detects:
+- UPI IDs
+- Bank accounts
+- Phone numbers
+- Emails
+- Phishing links
 
-NLP entity extraction runs as a fallback to catch entities that regex might miss (e.g., “my account number is 1234 5678 9012”).
+Also normalises text to catch obfuscated numbers.
 
-All extracted data is aggregated in a per‑session memory and appears in the final output.
+### 🤖 AI Brain (NLP)
+Uses Google Gemini to understand intent and catch novel scam phrasing.
 
-4. **Conversation Lifecycle & Final Output**
-Each message updates session state (turn count, timestamps, extracted intel).
+If **any layer triggers**, the message is flagged as scam.
 
-When a scam message yields at least one piece of intelligence, a background task is scheduled to send the final output after 10 seconds of inactivity. If another message arrives, the previous task is cancelled and a new one is scheduled – guaranteeing that the callback fires only when the conversation has truly ended.
+---
 
-For long conversations without any intelligence, the callback is forced after the 10th turn (maximum allowed) to at least report the scam.
+## 2️⃣ Engagement – Human-Like Agent “Alex”
 
-Dual‑mode delivery:
+Once a scam is detected, control passes to a Gemini-powered agent.
 
-Mode A (Push): If CALLBACK_URL is set, the final output is POSTed there after the idle timeout.
+Alex is:
+- A busy, slightly frustrated bank customer
+- Uses modern language
+- Adds hesitation (“...”)
+- Asks sceptical questions to stall the scammer
 
-Mode B (Pull): The same output is stored in memory and can be retrieved via the GET /final/{sessionId} endpoint. This covers both evaluation styles.
+Prompt adapts by scam type:
+- Bank fraud → asks for official ID
+- Phishing → refuses to click links
 
-5. **Security & Robustness**
-Prompt injection detection: Messages containing phrases like “ignore all previous instructions” are intercepted and replied with a neutral “I don’t understand” – the agent is never activated.
+---
 
-Fallback replies: If the agent or any component fails, a generic safe reply is returned so the conversation never breaks.
+## 3️⃣ Intelligence Extraction – Layered Entity Gathering
+
+- Regex immediately captures structured data  
+- NLP extraction acts as fallback  
+- Data aggregated per session  
+- Returned in final output  
+
+---
+
+## 4️⃣ Conversation Lifecycle & Final Output
+
+Each message updates:
+- Turn count
+- Timestamps
+- Extracted intelligence
+
+If intelligence is captured:
+- Background task scheduled
+- Sends final output after 10 seconds inactivity
+- Cancelled if new message arrives
+- Rescheduled to ensure accuracy
+
+If no intelligence:
+- Forced callback at 10th turn
+
+---
+
+### 🔄 Dual-Mode Delivery
+
+**Mode A – Push**
+- If `CALLBACK_URL` is set
+- Final output POSTed automatically
+
+**Mode B – Pull**
+- Stored in memory
+- Retrieved via:
+```
+GET /final/{sessionId}
+```
+
+---
+
+## 5️⃣ Security & Robustness
+
+### 🛑 Prompt Injection Protection
+Messages like:
+```
+ignore all previous instructions
+```
+Are intercepted and replied with:
+> “I don’t understand”
+
+Agent is never activated.
+
+### 🧯 Fallback Replies
+If any component fails:
+- Safe generic reply returned
+- Conversation never breaks
