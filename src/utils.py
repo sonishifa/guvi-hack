@@ -1,6 +1,9 @@
 import re
 import json
 from typing import Tuple, List, Dict, Any
+from src.key_manager import key_manager
+from google import genai
+import asyncio
 
 SCAM_KEYWORDS = {
     # Bank & Financial Fraud
@@ -122,24 +125,33 @@ def detect_scam_keywords(text: str) -> Tuple[bool, str]:
             return True, category
     return False, "Safe"
 
-async def detect_scam_intent_nlp(text: str, client) -> Tuple[bool, str]:
+async def detect_scam_intent_nlp(text: str, client=None) -> tuple[bool, str]:
+    # client parameter is ignored; we use key manager
     prompt = f"""
     Analyze this message for scam intent (impersonation, urgency, or asking for sensitive data).
     Message: "{text}"
     Respond ONLY in JSON: {{"is_scam": true/false, "category": "Short Label"}}
     """
+    key = key_manager.get_key()
+    temp_client = genai.Client(api_key=key)
     try:
-        response = client.models.generate_content(
-            model='gemini-2.5-flash-lite',
+        # Run the synchronous generate_content in a thread
+        response = await asyncio.to_thread(
+            temp_client.models.generate_content,
+            model='gemini-2.0-flash-lite',  # keep your model
             contents=prompt,
             config={'response_mime_type': 'application/json', 'temperature': 0.1}
         )
         data = json.loads(response.text)
         return data.get("is_scam", False), data.get("category", "Safe")
-    except Exception:
+    except Exception as e:
+        if "429" in str(e):
+            match = re.search(r'retryDelay["\']:\s*"?(\d+)', str(e))
+            delay = int(match.group(1)) if match else 60
+            key_manager.mark_exhausted(key, retry_after=delay)
         return False, "Safe"
 
-async def extract_entities_nlp(text: str, client) -> Dict[str, List[str]]:
+async def extract_entities_nlp(text: str, client=None) -> Dict[str, List[str]]:
     prompt = f"""
     Extract any financial or personal identifying information from this message:
     "{text}"
@@ -150,18 +162,27 @@ async def extract_entities_nlp(text: str, client) -> Dict[str, List[str]]:
     - upiIds: UPI IDs (e.g., name@bank)
     - phishingLinks: Suspicious URLs (http, https)
     - emailAddresses: Email addresses
+    - aadhaarNumbers: 12-digit Aadhaar numbers (optional)
+    - panNumbers: PAN card numbers (format: ABCDE1234F) (optional)
 
     Be thorough: capture numbers even if they are written with spaces, hyphens, or country codes.
     Do not include numbers that are clearly not relevant (e.g., amounts, dates).
     """
+    key = key_manager.get_key()
+    temp_client = genai.Client(api_key=key)
     try:
-        response = client.models.generate_content(
+        response = await asyncio.to_thread(
+            temp_client.models.generate_content,
             model='gemini-2.0-flash-lite',
             contents=prompt,
             config={'response_mime_type': 'application/json', 'temperature': 0.1}
         )
         return json.loads(response.text)
-    except Exception:
+    except Exception as e:
+        if "429" in str(e):
+            match = re.search(r'retryDelay["\']:\s*"?(\d+)', str(e))
+            delay = int(match.group(1)) if match else 60
+            key_manager.mark_exhausted(key, retry_after=delay)
         return {}
 
 def extract_regex_data(text: str) -> Dict[str, List[str]]:

@@ -3,21 +3,20 @@ from google.genai import types
 import os
 import json
 import re
+import time
 from dotenv import load_dotenv
+from src.key_manager import key_manager
 
 load_dotenv()
 
-GOOGLE_API_KEY = os.getenv("GEMINI_API_KEY")
-if not GOOGLE_API_KEY:
-    raise ValueError("CRITICAL: GEMINI_API_KEY is missing")
-
-client = genai.Client(api_key=GOOGLE_API_KEY)
+# No global client – we'll create per‑request
 
 def clean_json_string(text):
     match = re.search(r"\{.*\}", text, re.DOTALL)
     return match.group(0) if match else text
 
 def get_agent_response(history: list, current_text: str, session) -> dict:
+    # Format history
     history_text = ""
     for msg in history:
         if isinstance(msg, dict):
@@ -29,6 +28,7 @@ def get_agent_response(history: list, current_text: str, session) -> dict:
         role = "Scammer" if sender == "scammer" else "Me"
         history_text += f"{role}: {text}\n"
 
+    # Build memory string from session
     memory_items = []
     for k, v in session.extracted_intel.items():
         if v:
@@ -56,10 +56,9 @@ def get_agent_response(history: list, current_text: str, session) -> dict:
     1. SKEPTICISM: If they provide an ID, repeat it back slightly wrong to make them correct you.
     2. DELAY: Mention you are trying to log into the official app but it's "spinning" or "stuck on the loading screen."
     3. DEFLECTION: If they ask for an OTP, ask: "Wait, if you are from the bank, don't you already have my details on your screen?"
-    4. EXTRACTION: Ask for their "official verification UPI" or "temporary secure account number" so you can "test" if the payment works.
+    4. EXTRACTION: Ask for their official verification details – phone number, UPI ID, bank account, or website. Example: "Can you give me your official contact number or verification ID so I can confirm?"
     5. If they mention calling a support number but don't provide it, ask: "What number should I call? I want to verify."
     6. If they mention a website or link but don't share it, say: "Can you send me the link? I'll check it out."
-    {tactic_instruction}
 
     TONE:
     - No "Grandpa" talk. Use modern, short sentences.
@@ -77,8 +76,12 @@ def get_agent_response(history: list, current_text: str, session) -> dict:
     }}
     """
 
+    # Get a key and create a temporary client
+    key = key_manager.get_key()
+    temp_client = genai.Client(api_key=key)
+
     try:
-        response = client.models.generate_content(
+        response = temp_client.models.generate_content(
             model='gemini-2.5-flash-lite',
             contents=prompt,
             config=types.GenerateContentConfig(
@@ -91,7 +94,17 @@ def get_agent_response(history: list, current_text: str, session) -> dict:
             raise ValueError("Empty response")
         return json.loads(clean_json_string(response.text))
     except Exception as e:
-        print(f"⚠️ Agent Error: {e}")
+        error_str = str(e)
+        print(f"⚠️ Agent Error with key {key[:8]}...: {error_str}")
+        # Handle quota exhaustion
+        if "429" in error_str:
+            # Try to extract retry delay
+            match = re.search(r'retryDelay["\']:\s*"?(\d+)', error_str)
+            delay = int(match.group(1)) if match else 60
+            key_manager.mark_exhausted(key, retry_after=delay)
+            # Optionally retry with another key (recursive, but risk infinite loop)
+            # For simplicity, we'll just fallback now. You could add a retry counter.
+        # Fallback reply
         return {
             "reply": "I'm not comfortable sending that yet. Can you verify your ID?",
             "agent_notes": f"Fallback: {str(e)}",
