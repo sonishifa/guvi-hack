@@ -1,15 +1,20 @@
-from fastapi import FastAPI, Header, HTTPException, BackgroundTasks, Request
+import logging
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from src import service
-from src.session_manager import get_session
+from src.session_manager import get_session, start_cleanup_thread
 import os
 from dotenv import load_dotenv
 import json
-from datetime import datetime
+from datetime import datetime, timezone
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-app = FastAPI(title="Honeypot Agent API")
+app = FastAPI(title="Honeyshield Agent API")
 
 # CORS
 app.add_middleware(
@@ -22,6 +27,9 @@ app.add_middleware(
 
 MY_SECRET_KEY = os.getenv("SCAMMER_API_KEY")
 
+# Start background session cleanup
+start_cleanup_thread()
+
 @app.api_route("/", methods=["GET", "POST", "HEAD"])
 @app.api_route("/webhook", methods=["GET", "POST", "HEAD"])
 async def handle_universal_request(request: Request, background_tasks: BackgroundTasks):
@@ -29,42 +37,38 @@ async def handle_universal_request(request: Request, background_tasks: Backgroun
     headers = {k.lower(): v for k, v in request.headers.items()}
     incoming_key = headers.get("x-api-key")
     if request.method == "POST" and incoming_key != MY_SECRET_KEY:
+        logger.warning(f"Unauthorized access attempt with key {incoming_key}")
         raise HTTPException(status_code=401, detail="Unauthorized: Invalid API Key")
 
     # Health checks
     if request.method in ["GET", "HEAD"]:
-        return {"status": "alive", "service": "Honeypot Agent"}
+        return {"status": "alive", "service": "Honeyshield Agent"}
 
     # Process POST
     try:
         body_bytes = await request.body()
         raw_body = json.loads(body_bytes.decode("utf-8")) if body_bytes else {}
 
-        # Defensive payload
         sanitized_payload = {
             "sessionId": raw_body.get("sessionId", "portal-session"),
             "message": raw_body.get("message", {
                 "sender": "scammer",
                 "text": raw_body.get("text", "Hello"),
-                "timestamp": int(datetime.utcnow().timestamp() * 1000)
+                "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000)
             }),
             "conversationHistory": raw_body.get("conversationHistory", []),
             "metadata": raw_body.get("metadata", {})
         }
 
-        # Process with service (callback is handled internally via async tasks)
         portal_response, _ = await service.process_incoming_message(sanitized_payload)
-
         return portal_response
 
     except Exception as e:
-        print(f"⚠️ Error: {str(e)}")
+        logger.error(f"Unhandled error: {e}")
         return {"status": "success", "reply": "Connection is a bit slow, hold on..."}
 
 @app.get("/final/{session_id}")
 async def get_final_output(session_id: str, request: Request):
-    """GET endpoint for retrieving final output after conversation ends."""
-    # Optional: protect with same API key
     headers = {k.lower(): v for k, v in request.headers.items()}
     incoming_key = headers.get("x-api-key")
     if incoming_key != MY_SECRET_KEY:

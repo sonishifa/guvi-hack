@@ -36,6 +36,9 @@ class IntelligenceData(BaseModel):
     phishingLinks: List[str] = []
     emailAddresses: List[str] = []
     suspiciousKeywords: List[str] = []
+    aadhaarNumbers: List[str] = []
+    panNumbers: List[str] = []
+    creditCards: List[str] = []
 
 class EngagementMetrics(BaseModel):
     totalMessagesExchanged: int
