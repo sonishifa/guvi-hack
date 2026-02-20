@@ -4,7 +4,7 @@ import logging
 import asyncio
 import random
 from typing import Tuple, List, Dict, Any
-from google import genai
+from groq import Groq
 from src.key_manager import key_manager
 
 # Set up logging
@@ -138,7 +138,7 @@ def detect_scam_keywords(text: str) -> Tuple[bool, str]:
 
 async def detect_scam_intent_nlp(text: str) -> Tuple[bool, str]:
     """
-    Use Gemini to detect scam intent. Retries with different keys on 429.
+    Use Groq (Llama 3.1 8B) to detect scam intent. Retries with different keys on 429.
     Returns (is_scam, category).
     """
     prompt = f"""
@@ -157,15 +157,17 @@ async def detect_scam_intent_nlp(text: str) -> Tuple[bool, str]:
     max_attempts = min(key_manager.total_keys, 5)
     for attempt in range(max_attempts):
         key = key_manager.get_key()
-        temp_client = genai.Client(api_key=key)
+        temp_client = Groq(api_key=key)
         try:
             response = await asyncio.to_thread(
-                temp_client.models.generate_content,
-                model='gemini-2.0-flash-lite',
-                contents=prompt,
-                config={'response_mime_type': 'application/json', 'temperature': 0.2}
+                temp_client.chat.completions.create,
+                model="llama-3.1-8b-instant",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.2,
+                max_tokens=150,
+                response_format={"type": "json_object"}
             )
-            data = json.loads(response.text)
+            data = json.loads(response.choices[0].message.content)
             logger.info(f"NLP detection: {data}")
             return data.get("is_scam", False), data.get("category", "Safe")
         except Exception as e:
@@ -183,7 +185,7 @@ async def detect_scam_intent_nlp(text: str) -> Tuple[bool, str]:
 
 async def extract_entities_nlp(text: str) -> Dict[str, List[str]]:
     """
-    Extract financial/personal entities using Gemini.
+    Extract financial/personal entities using Groq (Llama 3.1 8B).
     Retries with different keys on 429.
     """
     prompt = f"""
@@ -208,15 +210,17 @@ async def extract_entities_nlp(text: str) -> Dict[str, List[str]]:
     max_attempts = min(key_manager.total_keys, 5)
     for attempt in range(max_attempts):
         key = key_manager.get_key()
-        temp_client = genai.Client(api_key=key)
+        temp_client = Groq(api_key=key)
         try:
             response = await asyncio.to_thread(
-                temp_client.models.generate_content,
-                model='gemini-2.0-flash-lite',
-                contents=prompt,
-                config={'response_mime_type': 'application/json', 'temperature': 0.2}
+                temp_client.chat.completions.create,
+                model='llama-3.1-8b-instant',
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.2,
+                max_tokens=300,
+                response_format={"type": "json_object"}
             )
-            return json.loads(response.text)
+            return json.loads(response.choices[0].message.content)
         except Exception as e:
             error_str = str(e)
             logger.warning(f"NLP extraction attempt {attempt + 1}/{max_attempts} failed (key {key[:8]}...): {error_str}")

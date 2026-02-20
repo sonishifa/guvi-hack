@@ -1,9 +1,7 @@
 """
-API Key Manager for Gemini with multi-key rotation.
-
-Supports multiple comma-separated keys in GEMINI_API_KEY env var.
+API Key Manager for Groq with multi-key rotation.
+Supports multiple comma-separated keys in GROQ_API_KEY env var.
 On 429 rate-limit, marks the key as exhausted and rotates to the next.
-Avoids infinite loops with a max-attempts cap.
 """
 
 import os
@@ -17,13 +15,13 @@ logger = logging.getLogger(__name__)
 
 
 class KeyManager:
-    """Manages multiple Gemini API keys with rate-limit aware rotation."""
+    """Manages multiple Groq API keys with rate-limit aware rotation."""
 
     def __init__(self):
-        raw = os.getenv("GEMINI_API_KEY", "")
+        raw = os.getenv("GROQ_API_KEY", "")
         self._keys = [k.strip() for k in raw.split(",") if k.strip()]
         if not self._keys:
-            raise ValueError("GEMINI_API_KEY environment variable not set")
+            raise ValueError("GROQ_API_KEY environment variable not set")
         self._index = 0
         self._exhausted: dict[str, float] = {}  # key -> available_after timestamp
         self._lock = threading.Lock()

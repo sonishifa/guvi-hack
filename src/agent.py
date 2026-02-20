@@ -1,5 +1,4 @@
-from google import genai
-from google.genai import types
+from groq import Groq
 import json
 import re
 import logging
@@ -15,7 +14,7 @@ def clean_json_string(text):
 
 def get_agent_response(history: list, current_text: str, session) -> dict:
     """
-    Generate a honeypot agent response using Gemini.
+    Generate a honeypot agent response using Groq (Llama 3.1 8B).
     Retries with different API keys on 429 errors (capped at total_keys attempts).
     """
     # Format history
@@ -38,13 +37,6 @@ def get_agent_response(history: list, current_text: str, session) -> dict:
     memory_str = " | ".join(memory_items) if memory_items else "No intel yet."
 
     scam_type = session.scam_type or "unknown"
-    tactic_instruction = ""
-    if "bank" in scam_type.lower() or "financial" in scam_type.lower():
-        tactic_instruction = "Ask for their official verification ID or phone number. Act skeptical."
-    elif "phishing" in scam_type.lower():
-        tactic_instruction = "Say you don't click links but ask them to describe the offer."
-    elif "upi" in scam_type.lower():
-        tactic_instruction = "Pretend you're trying to send money but it keeps failing. Ask them to confirm their UPI ID."
 
     prompt = f"""
     ROLE: You are Alex, a busy, slightly frustrated, but cautious bank customer.
@@ -64,7 +56,6 @@ def get_agent_response(history: list, current_text: str, session) -> dict:
     7. PROBING: Ask investigative questions — "What department are you calling from?", "What is your employee ID?", "Can I get the reference number for this case?", "What's the policy number you're referring to?"
     8. RED FLAGS: Explicitly call out when something feels suspicious — urgency pressure, OTP requests, threatening language, suspicious links, unsolicited contact.
     9. Always end with a question to keep the conversation going.
-    {tactic_instruction}
 
     TONE:
     - No "Grandpa" talk. Use modern, short sentences.
@@ -91,25 +82,28 @@ def get_agent_response(history: list, current_text: str, session) -> dict:
 
     for attempt in range(max_attempts):
         key = key_manager.get_key()
-        temp_client = genai.Client(api_key=key)
+        temp_client = Groq(api_key=key)
         try:
-            response = temp_client.models.generate_content(
-                model='gemini-2.5-flash-lite',
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type='application/json',
-                    temperature=0.4,
-                    max_output_tokens=300
-                )
+            response = temp_client.chat.completions.create(
+                model="llama-3.1-8b-instant",
+                messages=[
+                    {"role": "system", "content": "You are Alex, a cautious bank customer."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.4,
+                max_tokens=300,
+                response_format={"type": "json_object"}
             )
-            if not response.text:
-                raise ValueError("Empty response from Gemini")
-            return json.loads(clean_json_string(response.text))
+            content = response.choices[0].message.content
+            if not content:
+                raise ValueError("Empty response from Groq")
+            return json.loads(clean_json_string(content))
         except Exception as e:
             last_error = e
             error_str = str(e)
             logger.warning(f"Agent attempt {attempt + 1}/{max_attempts} failed (key {key[:8]}...): {error_str}")
             if "429" in error_str or "quota" in error_str.lower():
+                # Extract retry delay if present (Groq may not provide it)
                 match = re.search(r'retryDelay["\']:\s*"?(\d+)', error_str)
                 delay = int(match.group(1)) if match else 60
                 key_manager.mark_exhausted(key, retry_after=delay)
@@ -117,10 +111,10 @@ def get_agent_response(history: list, current_text: str, session) -> dict:
             else:
                 break  # Non-rate-limit error, don't retry
 
-    # All keys failed — return fallback
+    # All keys failed — return fallback (generic, not scenario‑specific)
     logger.error(f"Agent failed after {max_attempts} attempts: {last_error}")
     return {
-        "reply": "I'm not comfortable sending that yet... can you verify your ID first?",
+        "reply": "I'm not comfortable with this. Can you provide some verification?",
         "agent_notes": f"Agent fallback after {max_attempts} attempts: {last_error}",
         "suspicious_keywords": [],
         "red_flags": ["Suspicious request detected"],
