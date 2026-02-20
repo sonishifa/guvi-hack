@@ -2,12 +2,13 @@ from pydantic import BaseModel, Field, field_validator
 from typing import List, Optional, Union
 from datetime import datetime, timezone
 
+
 class Message(BaseModel):
     sender: str
     text: str
     timestamp: Union[str, int, float]
 
-    @field_validator('timestamp')
+    @field_validator("timestamp")
     @classmethod
     def convert_timestamp_to_iso(cls, v):
         if isinstance(v, (int, float)):
@@ -18,10 +19,12 @@ class Message(BaseModel):
                 return str(v)
         return str(v)
 
+
 class Metadata(BaseModel):
     channel: Optional[str] = None
     language: Optional[str] = None
     locale: Optional[str] = None
+
 
 class IncomingRequest(BaseModel):
     sessionId: str
@@ -29,29 +32,31 @@ class IncomingRequest(BaseModel):
     conversationHistory: List[dict] = []
     metadata: Optional[Metadata] = None
 
+
 class IntelligenceData(BaseModel):
     phoneNumbers: List[str] = []
     bankAccounts: List[str] = []
     upiIds: List[str] = []
     phishingLinks: List[str] = []
     emailAddresses: List[str] = []
-    suspiciousKeywords: List[str] = []
-    aadhaarNumbers: List[str] = []
-    panNumbers: List[str] = []
-    creditCards: List[str] = []
+    caseIds: List[str] = []
+    policyNumbers: List[str] = []
+    orderNumbers: List[str] = []
 
-class EngagementMetrics(BaseModel):
-    totalMessagesExchanged: int
-    engagementDurationSeconds: int
 
 class FinalOutput(BaseModel):
-    status: str = "success"
+    """Matches exact hackathon evaluation spec."""
+    sessionId: str
     scamDetected: bool
-    scamType: str
-    extractedIntelligence: IntelligenceData
-    engagementMetrics: EngagementMetrics
+    scamType: str = "unknown"
+    confidenceLevel: float = 0.0
+    totalMessagesExchanged: int = 0
+    engagementDurationSeconds: int = 0
+    extractedIntelligence: IntelligenceData = Field(default_factory=IntelligenceData)
     agentNotes: str = ""
+
 
 class AgentResponse(BaseModel):
     status: str = "success"
     reply: str
+    finalOutput: Optional[FinalOutput] = None
