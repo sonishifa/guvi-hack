@@ -5,9 +5,12 @@ import json
 import re
 import time
 from dotenv import load_dotenv
-from src.key_manager import key_manager
 
 load_dotenv()
+import os
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+if not GEMINI_API_KEY:
+    raise ValueError("GEMINI_API_KEY environment variable not set")
 
 # No global client – we'll create per‑request
 

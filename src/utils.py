@@ -5,7 +5,10 @@ import asyncio
 import random
 from typing import Tuple, List, Dict, Any
 from google import genai
-from src.key_manager import key_manager
+import os
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+if not GEMINI_API_KEY:
+    raise ValueError("GEMINI_API_KEY environment variable not set")
 
 # Set up logging
 logger = logging.getLogger(__name__)
